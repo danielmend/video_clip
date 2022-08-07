@@ -59,7 +59,7 @@ class AttentionHead(nn.Module):
     
     def _generate_mask(self, dim):
         mask = (torch.triu(torch.ones(dim, dim)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        mask = mask.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, 0.0)
         
         return mask
     
