@@ -13,10 +13,11 @@ train_loader = DataLoader(train_set, batch_size=2, shuffle=True)
 
 net = CLIPFormer(n_layers=2)
 criterion = contrastive_loss
-optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+optimizer = optim.SGD(net.parameters(), lr=1e-4, momentum=0.9)
 
-for epoch in range(2):  # loop over the dataset multiple times
+for epoch in range(1000):  # loop over the dataset multiple times
 
+    print(f'epoch {epoch}')
     running_loss = 0.0
     for i, data in enumerate(train_loader, 0):
         # get the inputs; data is a list of [inputs, labels]
@@ -30,7 +31,7 @@ for epoch in range(2):  # loop over the dataset multiple times
         last_frame = get_last_frame_from_model_output(self_attended, last_frame_idx)
         
         loss = criterion(txt_emb, last_frame)
-        print(loss)
+        print(f'batch loss: {loss}')
         loss.backward()
         optimizer.step()
 

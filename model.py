@@ -57,7 +57,7 @@ class AttentionHead(nn.Module):
         
         return q, k, v
     
-    def _generate_square_subsequent_mask(self, dim):
+    def _generate_mask(self, dim):
         mask = (torch.triu(torch.ones(dim, dim)) == 1).transpose(0, 1)
         mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
         
@@ -73,7 +73,7 @@ class AttentionHead(nn.Module):
         
         #if mask: apply to attn
         if mask:
-            mask = self._generate_square_subsequent_mask(attention.shape[-1])
+            mask = self._generate_mask(attention.shape[-1])
             attention = attention + mask
         
         #scale and normalize attn
