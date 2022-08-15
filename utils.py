@@ -60,7 +60,7 @@ def contrastive_loss(video_embeddings, text_embeddings, temperature = 0.9):
 
 def get_non_padded_frames(batch, idxs):
     return [
-        batch[i, 0:idxs[i], :]
+        batch[i, 0:idxs[i].item(), :]
         for i in range(len(idxs))
     ]
 
@@ -240,3 +240,17 @@ if __name__ == '__main__':
     model, preprocess = clip.load("ViT-B/32", device=device)
 
     clip_encode_video_file(model, preprocess, 'data/TrainValVideo/video0.mp4', 'data/', out_fps=1, device=device)
+
+def add_residuals(vid, residuals, window_size):
+    out_vid = vid
+    for idx, i in enumerate(range(0, len(vid), window_size)):
+        out_vid[i:min(i+window_size, len(vid))] += residuals[idx]
+    return out_vid
+    
+
+def process_residuals(batch, residuals, window_size):
+    processed_batch = batch
+    for idx, vid in enumerate(batch):
+        processed_batch[idx] = add_residuals(vid, residuals[idx], window_size)
+
+    return processed_batch

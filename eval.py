@@ -1,8 +1,8 @@
-from model import CLIPFormer
+from model import CLIPFormer, ResidualCLIPFormer
 import torch
 import os
-from data import CLIPEmbeddingsDataset, VideoEmbeddingDataset
-from utils import pad_video_frames, get_vid_embedding_from_model_output
+from data import CLIPEmbeddingsDataset, VideoEmbeddingDataset, ResidualCLIPFormerDataset
+from utils import pad_video_frames, get_vid_embedding_from_model_output, get_non_padded_frames, process_residuals
 import clip
 import numpy as np
 from torch.utils.data import DataLoader
@@ -11,8 +11,31 @@ import pandas as pd
 import json
 import copy
 
-def compute_video_embeddings(test_loader, model, device='cuda'):
+def compute_video_embeddings_residual(test_loader, model, window_size=20, device='cuda'):
+    model.eval()
+    predicted_embeddings = []
+    fnames = []
+    with torch.no_grad():
+        for i, data in enumerate(test_loader, 0):
+            
+            frames_padded, window_frames, txt_embedding, num_frames, video_id = data
+            frames = get_non_padded_frames(frames_padded, num_frames)
 
+            residuals = model(window_frames)
+       
+            resid = process_residuals(frames, residuals, window_size)
+
+            video_embeddings = []
+            for vid in resid:
+                video_embeddings.append(torch.mean(vid, axis=0))
+            vid_embedding = torch.stack(video_embeddings).half()
+
+            predicted_embeddings.extend(vid_embedding)
+            
+    predicted_embeddings = torch.stack(predicted_embeddings)[::window_size]
+    return predicted_embeddings, fnames
+
+def compute_video_embeddings(test_loader, model, device='cuda'):
     model.eval()
     predicted_embeddings = []
     fnames = []
@@ -30,7 +53,42 @@ def compute_video_embeddings(test_loader, model, device='cuda'):
     predicted_embeddings = torch.stack(predicted_embeddings)
     return predicted_embeddings, fnames
 
-def compute_topk_acc(captions_df_path, test_loader, model, clip_model, device='cuda', k=5, embeddings=None, fnames=None):
+def eval_model(test_loader, video_clip_model, embedding_fn, device='cuda'):
+    embeddings, fnames = embedding_fn(test_loader, video_clip_model, device='cuda')
+    text_features = torch.load('video_clip/test_word_embeds.pth')
+
+    sim_tensor = text_features @ embeddings.t()
+
+    return get_metrics(sim_tensor)
+
+def get_metrics(sim_tensor, top_k = [1,5,10], return_ranks = False):
+    stacked_sim_matrices = sim_tensor.permute(1,0,2)
+    first_argsort = torch.argsort(stacked_sim_matrices, dim = -1, descending= True)
+    second_argsort = torch.argsort(first_argsort, dim = -1, descending= False)
+
+    ranks = torch.flatten(torch.diagonal(second_argsort, dim1 = 1, dim2 = 2))
+
+    permuted_original_data = torch.flatten(torch.diagonal(sim_tensor, dim1 = 0, dim2 = 2))
+    mask = ~ torch.logical_or(torch.isinf(permuted_original_data), torch.isnan(permuted_original_data))
+    valid_ranks = ranks[mask]
+    
+    if return_ranks:
+        return list_recall(valid_ranks, top_k), valid_ranks
+    else:
+        return list_recall(valid_ranks, top_k)
+    
+def list_recall(lst, top_k):
+    if not torch.is_tensor(lst):
+        lst = torch.tensor(lst)
+
+    lst = lst.cpu()
+    results = {f"R@{k}" : float(torch.sum(lst < k) * 100 / len(lst)) for k in top_k}
+    results["Median_Rank"] = float(torch.median(lst + 1))
+    results["Mean_Rank"] = float(np.mean(lst.numpy() + 1))
+    results["Std_Rank"] = float(np.std(lst.numpy() + 1))
+    return results
+
+def compute_topk_acc_old(captions_df_path, test_loader, model, clip_model, device='cuda', k=5, embeddings=None, fnames=None):
     captions_df = pd.read_csv(captions_df_path)[['caption', 'video_id']]
     chunk_size = 10000
     if embeddings == None or fnames == None:
@@ -102,48 +160,16 @@ if __name__ == '__main__':
     ckpt = torch.load('../dev/ckpts_8_mha_64_dim/16_heads_512_dim_8_layers_epoch_100_no_mask_model_ckpt.pth')
     n_layers = 8
     n_heads = 16
-    attn_dim = 512
+    #attn_dim = 512
     device = 'cuda'
 
-    video_clip_model = CLIPFormer(n_layers=n_layers, attn_dim=attn_dim, n_heads=n_heads, mask=False, using_tel=True).to(device)
+    video_clip_model = ResidualCLIPFormer(n_layers=n_layers, n_heads=n_heads).to(device)
 
-    video_clip_model.load_state_dict(ckpt)
+    #video_clip_model.load_state_dict(ckpt)
 
-    embeddings_test_txt_path = 'video_clip/embeddings/test/text/'
     embeddings_test_vid_path = 'video_clip/embeddings/test/video/'
+    txt_embed_path = 'video_clip/test_word_embeds.pth'
+    test_set = ResidualCLIPFormerDataset(embeddings_test_vid_path, txt_embed_path)
+    test_loader = DataLoader(test_set, batch_size=128, shuffle=False)
     
-    test_set = VideoEmbeddingDataset(embeddings_test_vid_path)
-    test_loader = DataLoader(test_set, batch_size=16, shuffle=False)
-    
-    captions_dict = get_captions_df_from_json('data/test_videodatainfo.json').to_dict()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    clip_model, preprocess = clip.load("ViT-B/32", device=device)
-
-    #caption = 'hockey footage'
-    #vids = get_top_k_video_ids_for_caption(caption, test_loader, video_clip_model, clip_model)
-    #print(vids)
-    #cat_fpath = 'data/category.txt'
-    #test_data_fpath = 'data/test_videodatainfo.json'
-    #train_set = VideoEmbeddingDataset('video_clip/embeddings/train/video/')
-    #train_loader = DataLoader(train_set, batch_size=16, shuffle=False)
-    #pred_embeddings1, fnames1 = compute_video_embeddings(train_loader, video_clip_model)
-    pred_embeddings, fnames = compute_video_embeddings(test_loader, video_clip_model)
-
-    overall_embeddings = pred_embeddings.cpu().numpy()#torch.concat([pred_embeddings1, pred_embeddings2], axis=0).cpu().numpy()
-    print(overall_embeddings.shape)
-    
-    overall_fnames = np.asarray(fnames)#np.concatenate([fnames1, fnames2], axis=0)
-    print(overall_fnames.shape)
-    
-    np.save('/home/daniel/dev/video_clip/embeddings/predicted/embed.npy', overall_embeddings)
-    np.save('/home/daniel/dev/video_clip/embeddings/predicted/fnames.npy', overall_fnames)
-
-
-    #captions_df_path = 'data/test_videodatainfo.csv'   
-    #new_embeds, fnames = average_embed(test_loader)
-    #print(new_embeds.shape)
-    #acc = compute_topk_acc(captions_df_path, test_loader, video_clip_model, clip_model=clip_model, device='cuda', k=5, embeddings=None, fnames=None)
-    #print(acc)
-     
-    #acc = compute_topk_acc(captions_df_path, test_loader, video_clip_model, clip_model=clip_model, device='cuda', k=5)
-    #print(acc)
+    metrics = eval_model(test_loader, video_clip_model, compute_video_embeddings_residual, device='cuda')

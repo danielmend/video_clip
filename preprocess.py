@@ -47,17 +47,17 @@ if __name__ == '__main__':
     model, preprocess = clip.load("ViT-B/32", device=device)
 
     print('encoding train data')
-    load_captions_json_into_dir(model, train_json, train_caption_dir, device)
+    #load_captions_json_into_dir(model, train_json, train_caption_dir, device)
     print('captions encoded')
-    #clip_encode_video_dir(model, preprocess, train_videos, train_videos_dir, fps=5, device=device)
+    clip_encode_video_dir(model, preprocess, train_videos, train_videos_dir, fps=None, device=device)
     print('videos encoded')
 
     print('encoded train')
     print('encoding test data')
 
-    load_captions_json_into_dir(model, test_json, test_caption_dir, device)
+    #load_captions_json_into_dir(model, test_json, test_caption_dir, device)
     print('captions encoded')
-    #clip_encode_video_dir(model, preprocess, test_videos, test_videos_dir, fps=5, device=device)
+    clip_encode_video_dir(model, preprocess, test_videos, test_videos_dir, fps=None, device=device)
     print('videos encoded')
 
     print('encoded test')

@@ -218,3 +218,64 @@ class CLIPFormer(nn.Module):
             total_params += layer_params
             
         return total_params
+
+class ResidualCLIPFormer(nn.Module):
+    def __init__(
+        self, 
+        input_dim = 512,
+        n_layers = 4,
+        n_heads = 16,
+        out_dim = 512,
+        seq_len = 1024,
+        dropout = 0,
+    ):
+
+        super().__init__()
+            
+        self.input_dim = input_dim
+        
+        self.n_layers = n_layers
+        self.n_heads = n_heads
+        self.p_dropout = dropout
+        self.out_dim = out_dim
+        self.seq_len = seq_len
+
+        self.blocks = nn.ModuleList([
+            TransformerEncoderLayer(self.input_dim, n_heads, activation=nn.GELU(), batch_first = True)
+            for _ in range(n_layers)
+        ])
+
+        self.out_proj = nn.Linear(input_dim, out_dim)
+            
+        self.pos_encoding = PositionalEncoder(input_dim, seq_len)
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.blocks.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+    
+    def forward(self, tokens, mask=None):
+        
+        emb = self.pos_encoding(tokens)
+        for block in self.blocks:
+            emb = block(emb)
+            
+        emb = self.out_proj(emb)
+        
+        return emb
+    
+    @property
+    def _num_params(self):
+        total_params = 0
+        for p in list(self.parameters()):
+            layer_params = 1
+            
+            for s in list(p.size()):
+                layer_params *= s
+                
+            total_params += layer_params
+            
+        return total_params
+
+    

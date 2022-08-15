@@ -48,3 +48,37 @@ class VideoEmbeddingDataset(Dataset):
 
         return (vid_embeddings.to(self.device), num_frames, fname)
 
+class ResidualCLIPFormerDataset(Dataset):
+    '''
+    Creates offseted copies of each video in memory. Samples windows of size window_size to feed into residual transformer.
+    '''
+    def __init__(self, vid_embeddings_dir, txt_embed_path, seq_len=1024, num_txt_per_video=20, device='cuda'):
+        self.vid_embeddings_dir = vid_embeddings_dir
+        self.txt_embeds = torch.load(txt_embed_path)
+        
+        self.num_txt_per_video = num_txt_per_video
+        self.device = device
+        self.seq_len = seq_len
+
+        self.video_ids = np.repeat(sorted(os.listdir(vid_embeddings_dir)), num_txt_per_video)
+
+        self.len = len(self.video_ids)
+        
+    def __len__(self):
+        return self.len
+
+    def __getitem__(self, idx):
+        video_id = self.video_ids[idx]
+        frames = torch.from_numpy(np.load(f'{self.vid_embeddings_dir}{video_id}')).to(self.device)
+        
+        offset = idx % self.num_txt_per_video
+        frames_idx = idx//self.num_txt_per_video
+        num_frames = len(frames)
+        txt_embedding = self.txt_embeds[frames_idx, offset].to(self.device)
+        idxs = [offset+i for i in range(0, len(frames)-offset, self.num_txt_per_video)]
+        
+        out_frames = frames[idxs]
+
+        window_frames, _ = pad_video_frames(out_frames, self.seq_len)
+        padded_frames, _ = pad_video_frames(frames, self.seq_len)
+        return padded_frames.to(self.device), window_frames.to(self.device), txt_embedding, num_frames, video_id
