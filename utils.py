@@ -13,7 +13,7 @@ import pandas as pd
 import cv2
 from PIL import Image
 
-def cyclic_contrastive_loss(video_embeddings, text_embeddings, temperature=0.9, lambda1=0.01, lambda2=0.01):
+def cyclic_contrastive_loss(video_embeddings, text_embeddings, temperature=0.9, lambda1=0.025, lambda2=0.025):
     logits = text_embeddings @ video_embeddings.T # shape: (batch_size x batch_size)
     
     text_similarity = text_embeddings @ text_embeddings.T # shape: (batch_size x batch_size)
@@ -30,13 +30,10 @@ def cyclic_contrastive_loss(video_embeddings, text_embeddings, temperature=0.9, 
         text_loss + video_loss
     ) / 2 # shape: batch_size
     batch_size = len(logits)
-    inmodal_cyclic_loss = (video_similarity - text_similarity).square().mean()
-    #print(inmodal_cyclic_loss)
-    logits_text_per_image = video_embeddings @ text_embeddings.t()
-    logits_image_per_text = logits_text_per_image.t()
+    inmodal_cyclic_loss = (video_similarity - text_similarity).square().mean() / np.exp(temperature)**2
 
-    crossmodal_cyclic_loss = (logits_text_per_image - logits_image_per_text).square().mean()
-    #print(crossmodal_cyclic_loss)
+    crossmodal_cyclic_loss = (logits - logits.t()).square().mean() / np.exp(temperature)**2
+    
     return total_loss.mean() + lambda1 * inmodal_cyclic_loss + lambda2 * crossmodal_cyclic_loss# scalar
 
 def contrastive_loss(video_embeddings, text_embeddings, temperature = 0.9):
@@ -122,7 +119,6 @@ def average_captions(model, captions, out_dir, clip_model, device='cuda'):
     for video in captions_grouped:
         fname, df = video
         captions = list(df['caption'])
-        
         text = clip.tokenize(captions).to(device)
         with torch.no_grad():
             text_features = model.encode_text(text)

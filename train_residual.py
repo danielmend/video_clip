@@ -1,7 +1,7 @@
 import torch.optim as optim
 import torch
 from model import CLIPFormer, ResidualCLIPFormer
-from data import CLIPEmbeddingsDataset, VideoEmbeddingDataset, ResidualCLIPFormerDataset
+from data import CLIPEmbeddingsDataset, VideoEmbeddingDataset, ResidualCLIPFormerDataset, EvalResidualCLIPFormerDataset, ConcatenatedCaptionsDataset, TestConcatenatedCaptionsDataset, EvalConcatenatedCaptionsDataset
 from torch.utils.data import DataLoader
 from utils import contrastive_loss, cyclic_contrastive_loss, get_vid_embedding_from_model_output, get_uncertainty_for_batch, contrastive_loss_with_uncertainty, process_residuals, get_non_padded_frames
 import numpy as np 
@@ -46,15 +46,16 @@ train_loader = DataLoader(train_set, batch_size=train_batch_size, shuffle=True)
 test_set = ResidualCLIPFormerDataset(embeddings_test_vid_path, embeddings_test_txt_path)
 test_loader = DataLoader(test_set, batch_size=test_batch_size, shuffle=True)
 
-test_loader_unshuffle = DataLoader(test_set, batch_size=test_batch_size, shuffle=False)
+eval_test_set = EvalResidualCLIPFormerDataset(embeddings_test_vid_path, embeddings_test_txt_path)
+eval_test_loader = DataLoader(eval_test_set, batch_size=16, shuffle=False)
 
 net = ResidualCLIPFormer(n_layers=n_layers, n_heads=n_heads).to(device)
 print(f'num params: {net._num_params}')
 
 wandb.watch(net, log='all', log_freq=100)
-criterion = contrastive_loss
-optimizer = optim.SGD(net.parameters(), lr=lr, momentum=0.9)
-scheduler = StepLR(optimizer, 20, gamma = 0.5)
+criterion = cyclic_contrastive_loss
+optimizer = optim.Adam(net.parameters(), lr=lr)
+scheduler = StepLR(optimizer, 1, gamma = 0.95)
 
 def train(epoch, train_loader, net, optimizer, criterion, window_size=20):
     net.train()
@@ -62,20 +63,31 @@ def train(epoch, train_loader, net, optimizer, criterion, window_size=20):
     print_loss = 0
     for i, data in enumerate(train_loader, 0):
         
+        optimizer.zero_grad()
+
         frames_padded, window_frames, txt_embedding, num_frames, video_id = data
         frames = get_non_padded_frames(frames_padded, num_frames)
-    
-        optimizer.zero_grad()
-        residuals = net(window_frames)
-       
+        batch_size = frames_padded.shape[0]
+
+        mean_clip_embeddings = torch.stack([
+            torch.mean(vid, axis=-2) for vid in frames
+        ])
+
+        for idx in range(len(window_frames)):
+            window_frames[idx] = torch.roll(window_frames[idx], 1, 0)
+            window_frames[idx][0] = mean_clip_embeddings[idx]
+
+        residuals = torch.mean(net(window_frames), axis=-2)
+        vid_embedding = (mean_clip_embeddings + residuals).half()
+        '''
         resid = process_residuals(frames, residuals, window_size)
 
         video_embeddings = []
         for vid in resid:
             video_embeddings.append(torch.mean(vid, axis=0))
         vid_embedding = torch.stack(video_embeddings).half()
-
-        loss = contrastive_loss(vid_embedding, txt_embedding)
+        '''
+        loss = criterion(vid_embedding, txt_embedding)
         wandb.log({"train_loss": loss})
 
         loss.backward()
@@ -99,19 +111,27 @@ def test(epoch, test_loader, net, criterion, window_size = 20):
         for i, data in enumerate(test_loader, 0):
             frames_padded, window_frames, txt_embedding, num_frames, video_id = data
             frames = get_non_padded_frames(frames_padded, num_frames)
-        
-            optimizer.zero_grad()
+            batch_size = frames_padded.shape[0]
 
-            residuals = net(window_frames)
-       
-            resid = process_residuals(frames, residuals, window_size)
+            mean_clip_embeddings = torch.stack([
+                torch.mean(vid, axis=-2) for vid in frames
+            ])
 
-            video_embeddings = []
-            for vid in resid:
-                video_embeddings.append(torch.mean(vid, axis=0))
-            vid_embedding = torch.stack(video_embeddings).half()
+            for idx in range(len(window_frames)):
+                window_frames[idx] = torch.roll(window_frames[idx], 1, 0)
+                window_frames[idx][0] = mean_clip_embeddings[idx]
+                
+            residuals = torch.mean(net(window_frames), axis=-2)
+            vid_embedding = (mean_clip_embeddings + residuals).half()
+
+            #resid = process_residuals(frames, residuals, window_size)
+
+            #video_embeddings = []
+            #for vid in resid:
+            #    video_embeddings.append(torch.mean(vid, axis=0))
+            #vid_embedding = torch.stack(video_embeddings).half()
             
-            loss = contrastive_loss(vid_embedding, txt_embedding)
+            loss = criterion(vid_embedding, txt_embedding)
             wandb.log({"eval_loss": loss})
             
             running_loss += loss.item()
@@ -130,7 +150,8 @@ k = 5
 for epoch in range(n_epochs):
 
     print('learning rate:', scheduler.get_last_lr())
-    wandb.log({'last_lr': scheduler.get_last_lr()[0]})
+
+    
 
     train_loss = train(epoch, train_loader, net, optimizer, criterion)
     wandb.log({'train_epoch_loss': train_loss, 'epoch': epoch})
@@ -141,13 +162,15 @@ for epoch in range(n_epochs):
 
     test_losses.append(test_loss)
     train_losses.append(train_loss)
-    if epoch % 5 == 0:
-        print('saving checkpoint...')
-        torch.save(net.state_dict(), f'residual_ckpts/epoch_{epoch}.pth')
-        metrics = eval_model(test_loader_unshuffle, net, embeddings_fn, device='cuda')        
-        print(f'Top {k} acc: {metrics}')
-        metrics['epoch'] = epoch
-        wandb.log(metrics)
+
+    print('saving checkpoint...')
+    torch.save(net.state_dict(), f'updated_residual_ckpts/epoch_{epoch}.pth')
+
+    metrics = eval_model(eval_test_loader, net, embeddings_fn, device='cuda')        
+    print(f'Top {k} acc: {metrics}')
+    metrics['epoch'] = epoch
+    wandb.log(metrics)
+
     scheduler.step()
     
 print('Finished Training')
