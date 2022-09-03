@@ -21,6 +21,11 @@ def compute_video_embeddings_residual(eval_test_loader, model, window_size=20, d
             frames = get_non_padded_frames(frames_padded, num_frames)
             batch_size = frames_padded.shape[0]
 
+            mask = torch.tensor([
+                [0  if j < num_frames[i] else 1 for j in range(model.seq_len)]
+                for i in range(len(num_frames))
+            ]).float().to('cuda')
+
             mean_clip_embeddings = torch.stack([
                 torch.mean(vid, axis=-2) for vid in frames
             ])
@@ -29,7 +34,7 @@ def compute_video_embeddings_residual(eval_test_loader, model, window_size=20, d
                 window_frames[idx] = torch.roll(window_frames[idx], 1, 0)
                 window_frames[idx][0] = mean_clip_embeddings[idx]
                 
-            residuals = torch.mean(model(window_frames), axis=-2)
+            residuals = torch.mean(model(window_frames, mask = mask), axis=-2)
             vid_embedding = (mean_clip_embeddings + residuals).half()
 
             '''
@@ -169,7 +174,7 @@ def get_top_k_video_ids_for_caption(caption, test_loader, model, clip_model, emb
 
 if __name__ == '__main__':
     torch.manual_seed(0)
-    ckpt = torch.load('../dev/residual_ckpts/epoch_2.pth')
+    ckpt = torch.load('../dev/updated_residual_ckpts/epoch_1.pth')
     n_layers = 4
     n_heads = 16
     #attn_dim = 512
@@ -181,14 +186,27 @@ if __name__ == '__main__':
     video_clip_model.load_state_dict(ckpt)
 
     embeddings_test_vid_path = 'video_clip/embeddings/test/video/'
-    txt_embed_path = 'video_clip/test_word_embeds.pth'
+    test_txt_embed_path = 'video_clip/test_word_embeds.pth'
 
-    eval_test_set = EvalResidualCLIPFormerDataset(embeddings_test_vid_path, txt_embed_path)
-    eval_loader = DataLoader(eval_test_set, batch_size=16, shuffle=False)
+    embeddings_train_vid_path = 'video_clip/embeddings/train/video/'
+    train_txt_embed_path = 'video_clip/train_word_embeds.pth'
+
+    eval_train_set = EvalResidualCLIPFormerDataset(embeddings_train_vid_path, train_txt_embed_path)
+    eval_train_loader = DataLoader(eval_train_set, batch_size=16, shuffle=False)
     
-    embeddings, fnames = compute_video_embeddings_residual(test_loader, video_clip_model, device='cuda')
-    print(embeddings.shape)
-    print(len(fnames))
+    eval_test_set = EvalResidualCLIPFormerDataset(embeddings_test_vid_path, test_txt_embed_path)
+    eval_test_loader = DataLoader(eval_test_set, batch_size=16, shuffle=False)
+    
+    train_embeddings, train_fnames = compute_video_embeddings_residual(eval_train_loader, video_clip_model, device='cuda')
+    print(len(train_embeddings))
+    np.save('video_clip/embeddings/predicted/embeds_train.npy', train_embeddings.cpu().numpy())
+    np.save('video_clip/embeddings/predicted/fnames_train.npy', train_fnames)
+
+    test_embeddings, test_fnames = compute_video_embeddings_residual(eval_test_loader, video_clip_model, device='cuda')
+    print(len(test_embeddings))
+    np.save('video_clip/embeddings/predicted/embeds_test.npy', test_embeddings.cpu().numpy())
+    np.save('video_clip/embeddings/predicted/fnames_test.npy', test_fnames)
+
     #metrics = eval_model(test_loader, video_clip_model, compute_video_embeddings_residual, device='cuda')
     #print(metrics)
     #caption = 'eating noodles'

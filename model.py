@@ -229,7 +229,6 @@ class ResidualCLIPFormer(nn.Module):
         seq_len = 1024,
         dropout = 0,
     ):
-
         super().__init__()
             
         self.input_dim = input_dim
@@ -259,7 +258,7 @@ class ResidualCLIPFormer(nn.Module):
         
         emb = self.pos_encoding(tokens)
         for block in self.blocks:
-            emb = block(emb)
+            emb = block(emb, src_key_padding_mask = mask)
             
         emb = self.out_proj(emb)
         
@@ -277,5 +276,3 @@ class ResidualCLIPFormer(nn.Module):
             total_params += layer_params
             
         return total_params
-
-    

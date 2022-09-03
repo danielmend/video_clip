@@ -32,8 +32,10 @@ class CLIPBatchedEmbeddingsDataset(Dataset):
     def __init__(self, vid_embeddings_dir, txt_embeddings_dir, seq_len=1024, batch_size = 5, device='cuda'):
         self.vid_embeddings_dir = vid_embeddings_dir
         self.txt_embeddings_dir = txt_embeddings_dir
-        self.seq_len = seq_len
         self.device = device
+        self.start_idx = int(sorted(os.listdir(vid_embeddings_dir))[0].split('.npy')[0].split('video')[-1])
+        self.txt_embeddings = torch.load(self.txt_embeddings_dir, map_location=torch.device(self.device)).half()
+        self.seq_len = seq_len
         self.batch_size = batch_size
 
         self.len = len(os.listdir(self.vid_embeddings_dir)) * 20
@@ -42,23 +44,23 @@ class CLIPBatchedEmbeddingsDataset(Dataset):
         return self.len
 
     def __getitem__(self, idx):
-
         video_idx = idx // 20
         txt_idx = idx % 20
 
-        txt_embedding = torch.load(f'{self.txt_embeddings_dir}', map_location=torch.device(self.device)).float().to(self.device)[video_idx][txt_idx]
+        txt_embedding = self.txt_embeddings[video_idx][txt_idx]
 
         vid_name = f'video{video_idx}.npy'
-        vid_embeddings = torch.from_numpy(np.load(f'{self.vid_embeddings_dir}video{video_idx}.npy'))
-        vid_len = len(vid_embeddings)
+        frames = torch.from_numpy(np.load(f'{self.vid_embeddings_dir}video{self.start_idx + video_idx}.npy'))
+        vid_len = len(frames)
 
         vid_idxs = torch.arange(txt_idx, vid_len - (vid_len - txt_idx) % self.batch_size).reshape((vid_len - txt_idx) // self.batch_size, self.batch_size)
-        vid_embeddings = vid_embeddings[vid_idxs]
+        vid_embeddings = frames[vid_idxs]
         vid_embeddings = torch.mean(vid_embeddings, 1)
 
-        vid_embeddings, num_frames = pad_video_frames(vid_embeddings, self.seq_len)
+        vid_embeddings, _ = pad_video_frames(vid_embeddings, self.seq_len)
+        frames, num_frames = pad_video_frames(frames, self.seq_len)
 
-        return (vid_embeddings.float().to(self.device), txt_embedding, num_frames, vid_name)
+        return frames.half().to(self.device), vid_embeddings.half().to(self.device), txt_embedding.half(), num_frames, vid_name
 
 class VideoEmbeddingDataset(Dataset):
     def __init__(self, vid_embeddings_dir, seq_len=1024, device='cuda'):
@@ -208,38 +210,6 @@ class EvalConcatenatedCaptionsDataset(ConcatenatedCaptionsDataset):
         window_frames, _ = pad_video_frames(window_frames, self.seq_len)
 
         return (frames_padded.half().to(self.device), window_frames.half().to(self.device), num_frames, fname)
-
-class CLIPBatchedEmbeddingsDataset(Dataset):
-    def __init__(self, vid_embeddings_dir, txt_embeddings_dir, seq_len=1024, batch_size = 5, device='cuda'):
-        self.vid_embeddings_dir = vid_embeddings_dir
-        self.txt_embeddings_dir = txt_embeddings_dir
-        self.seq_len = seq_len
-        self.device = device
-        self.batch_size = batch_size
-
-        self.len = len(os.listdir(self.vid_embeddings_dir)) * 20
-
-    def __len__(self):
-        return self.len
-
-    def __getitem__(self, idx):
-
-        video_idx = idx // 20
-        txt_idx = idx % 20
-
-        txt_embedding = torch.load(f'{self.txt_embeddings_dir}', map_location=torch.device(self.device)).float().to(self.device)[video_idx][txt_idx]
-
-        vid_name = f'video{video_idx}.npy'
-        vid_embeddings = torch.from_numpy(np.load(f'{self.vid_embeddings_dir}video{video_idx}.npy'))
-        vid_len = len(vid_embeddings)
-
-        vid_idxs = torch.arange(txt_idx, vid_len - (vid_len - txt_idx) % self.batch_size).reshape((vid_len - txt_idx) // self.batch_size, self.batch_size)
-        vid_embeddings = vid_embeddings[vid_idxs]
-        vid_embeddings = torch.mean(vid_embeddings, 1)
-
-        vid_embeddings, num_frames = pad_video_frames(vid_embeddings, self.seq_len)
-
-        return (vid_embeddings.float().to(self.device), txt_embedding, num_frames, vid_name)
 
 vid_embeddings_dir = 'video_clip/embeddings/test/video/'
 txt_embeddings_dir = 'video_clip/embeddings/test/text/'
