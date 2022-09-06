@@ -37,14 +37,6 @@ def compute_video_embeddings_residual(eval_test_loader, model, window_size=20, d
             residuals = torch.mean(model(window_frames, mask = mask), axis=-2)
             vid_embedding = (mean_clip_embeddings + residuals).half()
 
-            '''
-            resid = process_residuals(frames, residuals, window_size)
-
-            video_embeddings = []
-            for vid in resid:
-                video_embeddings.append(torch.mean(vid, axis=0))
-            vid_embedding = torch.stack(video_embeddings).half()
-            '''
             fnames.extend(video_id)
             predicted_embeddings.extend(vid_embedding)
             
@@ -177,7 +169,6 @@ if __name__ == '__main__':
     ckpt = torch.load('../dev/updated_residual_ckpts/epoch_1.pth')
     n_layers = 4
     n_heads = 16
-    #attn_dim = 512
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     clip_model, preprocess = clip.load("ViT-B/32", device=device)

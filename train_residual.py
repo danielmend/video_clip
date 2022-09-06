@@ -84,14 +84,7 @@ def train(epoch, train_loader, net, optimizer, criterion, window_size=20):
 
         residuals = torch.mean(net(window_frames, mask = mask), axis=-2)
         vid_embedding = (mean_clip_embeddings + residuals).half()
-        '''
-        resid = process_residuals(frames, residuals, window_size)
 
-        video_embeddings = []
-        for vid in resid:
-            video_embeddings.append(torch.mean(vid, axis=0))
-        vid_embedding = torch.stack(video_embeddings).half()
-        '''
         loss = criterion(vid_embedding, txt_embedding)
         wandb.log({"train_loss": loss})
 
@@ -134,13 +127,6 @@ def test(epoch, test_loader, net, criterion, window_size = 20):
 
             residuals = torch.mean(net(window_frames, mask = mask), axis=-2)
             vid_embedding = (mean_clip_embeddings + residuals).half()
-
-            #resid = process_residuals(frames, residuals, window_size)
-
-            #video_embeddings = []
-            #for vid in resid:
-            #    video_embeddings.append(torch.mean(vid, axis=0))
-            #vid_embedding = torch.stack(video_embeddings).half()
             
             loss = criterion(vid_embedding, txt_embedding)
             wandb.log({"eval_loss": loss})
