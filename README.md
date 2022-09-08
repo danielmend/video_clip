@@ -5,4 +5,4 @@ A simple live demo of this model can be accessed [here](http://daniel.mendelevit
 
 An infographic of the technique used to train this model is below:
 
-![info](residual_clipformer_info.jpg)
+![info](residual_clipformer_info_v2.jpg)
